@@ -1,0 +1,432 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// USER & AUTHENTICATION
+// ============================================================================
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  KEPALA_SEKOLAH
+  GURU
+  VIEWER
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String
+  role          Role
+  profilePicture String?
+  phone         String?
+  address       String?
+  active        Boolean  @default(true)
+  lastLogin     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  teacher       Teacher?
+  preferences   UserPreference[]
+  auditLogs     AuditLog[]
+}
+
+model UserPreference {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredDays   String[] // Array of day names: ["Monday", "Tuesday", ...]
+  preferredTimes  String[] // Array of time ranges: ["07:00-09:00", ...]
+  notAvailable    String[] // Tanggal/waktu tidak tersedia
+  maxHourPerDay   Int      @default(8)
+  maxHourConsec   Int      @default(4)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================================================
+// ACADEMIC STRUCTURE
+// ============================================================================
+
+model AcademicYear {
+  id            String   @id @default(cuid())
+  year          String   @unique // e.g., "2024/2025"
+  startDate     DateTime
+  endDate       DateTime
+  active        Boolean  @default(false)
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  semesters     Semester[]
+  schedules     Schedule[]
+}
+
+model Semester {
+  id            String   @id @default(cuid())
+  academicYearId String
+  academicYear  AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  name          String   // "Ganjil", "Genap"
+  startDate     DateTime
+  endDate       DateTime
+  active        Boolean  @default(false)
+  effectiveDays Int      // Jumlah hari efektif
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  timeSlots     TimeSlot[]
+  schedules     Schedule[]
+  holidays      Holiday[]
+
+  @@unique([academicYearId, name])
+}
+
+model Grade {
+  id            String   @id @default(cuid())
+  name          String   @unique // "1", "2", "3", ..., "12"
+  level         Int      @unique // 1-12
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rombles       Rombel[]
+}
+
+model Major {
+  id            String   @id @default(cuid())
+  name          String   @unique // "IPA", "IPS", "Teknik Komputer", etc
+  code          String   @unique
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rombles       Rombel[]
+}
+
+model Rombel {
+  id            String   @id @default(cuid())
+  gradeId       String
+  grade         Grade    @relation(fields: [gradeId], references: [id], onDelete: Cascade)
+  majorId       String?
+  major         Major?   @relation(fields: [majorId], references: [id])
+  name          String   // "X", "X-A", "XI-IPA-1", etc
+  code          String   @unique
+  capacity      Int      @default(30)
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  classes       Class[]
+
+  @@unique([gradeId, majorId, name])
+}
+
+model Class {
+  id            String   @id @default(cuid())
+  rombelId      String
+  rombel        Rombel   @relation(fields: [rombelId], references: [id], onDelete: Cascade)
+  name          String   // "X-A-1", "XI-IPA-1-A", etc
+  capacity      Int      @default(30)
+  advisorId     String?
+  advisor       Teacher? @relation("ClassAdvisor", fields: [advisorId], references: [id])
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  scheduleItems ScheduleItem[]
+  classAdvisors ClassAdvisor[]
+
+  @@unique([rombelId, name])
+}
+
+model ClassAdvisor {
+  id            String   @id @default(cuid())
+  classId       String
+  class         Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacherId     String
+  teacher       Teacher  @relation("TeacherAdvisor", fields: [teacherId], references: [id], onDelete: Cascade)
+  startDate     DateTime
+  endDate       DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([classId, teacherId, startDate])
+}
+
+// ============================================================================
+// TEACHER & SUBJECT
+// ============================================================================
+
+model Teacher {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nip           String?  @unique
+  specialization String?
+  certifications String[]  // Array of certifications
+  qualification String?    // S1, S2, S3
+  status        String   @default("Aktif") // Aktif, Cuti, Pensiun
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  teachingLoads TeachingLoad[]
+  scheduleItems ScheduleItem[]
+  preferences   UserPreference?
+  classAdvisors ClassAdvisor @relation("TeacherAdvisor")
+  classAdvisedBy Class @relation("ClassAdvisor")
+}
+
+model Subject {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  code          String   @unique
+  jpPerWeek     Int      // Jumlah JP per minggu
+  jpPerSemester Int      // Jumlah JP per semester
+  category      String   // "Umum", "Praktik", "Komputer", etc
+  requiresLab   Boolean  @default(false)
+  requiresPC    Boolean  @default(false)
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  teachingLoads TeachingLoad[]
+  scheduleItems ScheduleItem[]
+  constraints   SubjectConstraint[]
+}
+
+model TeachingLoad {
+  id            String   @id @default(cuid())
+  teacherId     String
+  teacher       Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  classId       String
+  class         Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subjectId     String
+  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  jpPerWeek     Int      // Jumlah JP mengajar per minggu
+  status        String   @default("Aktif")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([teacherId, classId, subjectId])
+}
+
+// ============================================================================
+// ROOM & RESOURCE
+// ============================================================================
+
+model RoomType {
+  id            String   @id @default(cuid())
+  name          String   @unique // "Kelas", "Lab", "Komputer", etc
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rooms         Room[]
+}
+
+model Room {
+  id            String   @id @default(cuid())
+  name          String   @unique // "101", "102", "Lab Fisika", etc
+  code          String   @unique
+  roomTypeId    String
+  roomType      RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  capacity      Int      @default(30)
+  floor         Int?
+  building      String?
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  scheduleItems ScheduleItem[]
+}
+
+// ============================================================================
+// TIME SLOT & SCHEDULE
+// ============================================================================
+
+model TimeSlot {
+  id            String   @id @default(cuid())
+  semesterId    String
+  semester      Semester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  day           String   // "Monday", "Tuesday", etc
+  dayNumber     Int      // 1-5 (Senin-Jumat)
+  slotNumber    Int      // 1, 2, 3, etc
+  startTime     DateTime @db.Time
+  endTime       DateTime @db.Time
+  duration      Int      // in minutes
+  isBreak       Boolean  @default(false)
+  isUsable      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  scheduleItems ScheduleItem[]
+
+  @@unique([semesterId, day, slotNumber])
+}
+
+model Schedule {
+  id            String   @id @default(cuid())
+  academicYearId String
+  academicYear  AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  semesterId    String
+  semester      Semester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  name          String
+  status        String   @default("Draft") // Draft, Generated, Reviewed, Approved, Published
+  generatedAt   DateTime?
+  approvedAt    DateTime?
+  publishedAt   DateTime?
+  quality       Float    @default(0) // 0-100
+  conflictCount Int      @default(0)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items         ScheduleItem[]
+  conflicts     ScheduleConflict[]
+  versions      ScheduleVersion[]
+}
+
+model ScheduleItem {
+  id            String   @id @default(cuid())
+  scheduleId    String
+  schedule      Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  classId       String
+  class         Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacherId     String
+  teacher       Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId     String
+  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  roomId        String
+  room          Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  timeSlotId    String
+  timeSlot      TimeSlot @relation(fields: [timeSlotId], references: [id], onDelete: Cascade)
+  locked        Boolean  @default(false) // Lock jadwal agar tidak berubah saat regenerasi
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  conflicts     ScheduleConflict[]
+
+  @@unique([scheduleId, classId, timeSlotId])
+  @@unique([scheduleId, teacherId, timeSlotId])
+  @@unique([scheduleId, roomId, timeSlotId])
+}
+
+model ScheduleConflict {
+  id            String   @id @default(cuid())
+  scheduleId    String
+  schedule      Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  scheduleItem1Id String
+  scheduleItem1 ScheduleItem @relation(fields: [scheduleItem1Id], references: [id], onDelete: Cascade)
+  scheduleItem2Id String?
+  conflictType  String   // "teacher_double_class", "room_conflict", "class_double_subject", etc
+  description   String
+  severity      String   @default("High") // High, Medium, Low
+  resolved      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([scheduleId, scheduleItem1Id, conflictType])
+}
+
+model ScheduleVersion {
+  id            String   @id @default(cuid())
+  scheduleId    String
+  schedule      Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  status        String   @default("Active")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([scheduleId, versionNumber])
+}
+
+// ============================================================================
+// CONSTRAINT & RULE
+// ============================================================================
+
+enum ConstraintType {
+  HARD
+  SOFT
+}
+
+model Constraint {
+  id            String   @id @default(cuid())
+  name          String
+  type          ConstraintType
+  description   String?
+  priority      Int      @default(1) // Higher = more important
+  enabled       Boolean  @default(true)
+  weight        Float    @default(1.0) // For soft constraints
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model SubjectConstraint {
+  id            String   @id @default(cuid())
+  subjectId     String
+  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  constraintType String  // "no_first_hour", "no_last_hour", "require_lab", etc
+  value         String?  // JSON untuk menyimpan nilai constraint
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ============================================================================
+// SPECIAL DATES & HOLIDAYS
+// ============================================================================
+
+model Holiday {
+  id            String   @id @default(cuid())
+  semesterId    String
+  semester      Semester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  date          DateTime
+  name          String
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([semesterId, date])
+}
+
+// ============================================================================
+// AUDIT & LOGGING
+// ============================================================================
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action        String   // "CREATE", "UPDATE", "DELETE", "GENERATE", etc
+  entityType    String   // "Schedule", "Teacher", "Class", etc
+  entityId      String
+  changes       String?  // JSON untuk menyimpan perubahan
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+}
+
+model SystemLog {
+  id            String   @id @default(cuid())
+  level         String   // "INFO", "WARNING", "ERROR", "DEBUG"
+  module        String   // Backend module yang generate log
+  message       String
+  details       String?  // JSON untuk detail tambahan
+  createdAt     DateTime @default(now())
+
+  @@index([level])
+  @@index([createdAt])
+}
